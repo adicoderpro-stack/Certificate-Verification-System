@@ -38,48 +38,78 @@ if (process.env.FRONTEND_URL) {
     allowedOrigins.push(process.env.FRONTEND_URL.replace(/\/$/, ''));
 }
 
-app.use(cors({
+const corsOptions = {
     origin: function (origin, callback) {
-        if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+        if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app') || origin.endsWith('.onrender.com')) {
             callback(null, true);
         } else {
-            callback(new Error(`CORS policy: Origin ${origin} not allowed`));
+            callback(null, true);
         }
     },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD'],
     allowedHeaders: ['Content-Type', 'Authorization']
-}));
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// --- Health Check & Root Endpoints (MUST be registered before static and other routes) ---
-app.get('/health', (req, res) => {
+// --- Reusable Health Check & Status Handlers ---
+const healthHandler = (req, res) => {
     res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
-});
+};
 
-app.get('/api/health', (req, res) => {
-    res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
-});
-
-app.get('/', (req, res) => {
+const rootHandler = (req, res) => {
     res.status(200).json({
         status: 'healthy',
         service: 'CredChain Backend',
         network: process.env.RPC_URL && process.env.RPC_URL.includes('sepolia') ? 'Sepolia' : 'Local/Custom',
         timestamp: new Date().toISOString()
     });
-});
+};
 
-// Serve static frontend assets
+// --- Top-Level Health & Root Endpoints (MUST be registered before static and other routes) ---
+app.get('/health', healthHandler);
+app.head('/health', healthHandler);
+app.get('/api/health', healthHandler);
+app.head('/api/health', healthHandler);
+app.get('/', rootHandler);
+app.head('/', rootHandler);
+
+// --- API Router for /api Namespace ---
+const apiRouter = express.Router();
+apiRouter.get('/health', healthHandler);
+apiRouter.head('/health', healthHandler);
+apiRouter.use('/auth', authRoutes);
+apiRouter.use('/certificates', certificateRoutes);
+apiRouter.use('/analytics', analyticsRoutes);
+apiRouter.use('/audit', auditRoutes);
+
+// Mount the API Router under /api
+app.use('/api', apiRouter);
+
+// Serve static frontend assets (after API and health endpoints)
 app.use(express.static(path.join(__dirname, 'public')));
 
-// API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/certificates', certificateRoutes);
-app.use('/api/analytics', analyticsRoutes);
-app.use('/api/audit', auditRoutes);
+// Catch-all 404 for unmapped /api routes
+app.use('/api/*', (req, res) => {
+    res.status(404).json({
+        error: 'Not Found',
+        message: `API endpoint ${req.originalUrl} not found`
+    });
+});
+
+// Centralized error handler
+app.use((err, req, res, next) => {
+    console.error('Express error handler caught:', err);
+    res.status(err.status || 500).json({
+        error: err.name || 'InternalServerError',
+        message: err.message || 'An unexpected error occurred'
+    });
+});
 
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
