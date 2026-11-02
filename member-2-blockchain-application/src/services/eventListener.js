@@ -175,6 +175,19 @@ export async function backfillHistoricalEvents() {
         const issuerAuthFilter = instRegistry.filters.IssuerAuthorized();
         const issuerRevFilter = instRegistry.filters.IssuerRevoked();
 
+        let fromBlock = 0;
+        try {
+            const currentBlock = await provider.getBlockNumber();
+            const network = await provider.getNetwork();
+            if (network.chainId === 11155111n || Number(network.chainId) === 11155111) {
+                fromBlock = process.env.START_BLOCK ? parseInt(process.env.START_BLOCK, 10) : 12048925;
+            } else if (currentBlock > 45000) {
+                fromBlock = currentBlock - 45000;
+            }
+        } catch (bErr) {
+            console.warn('Could not determine block range for event backfill, defaulting to 0:', bErr.message);
+        }
+
         const [
             issuedLogs,
             revokedLogs,
@@ -184,13 +197,13 @@ export async function backfillHistoricalEvents() {
             issuerAuthLogs,
             issuerRevLogs
         ] = await Promise.all([
-            certRegistry.queryFilter(certIssuedFilter, 0, 'latest'),
-            certRegistry.queryFilter(certRevokedFilter, 0, 'latest'),
-            certRegistry.queryFilter(certVersionFilter, 0, 'latest'),
-            instRegistry.queryFilter(instRegFilter, 0, 'latest'),
-            instRegistry.queryFilter(instDeactFilter, 0, 'latest'),
-            instRegistry.queryFilter(issuerAuthFilter, 0, 'latest'),
-            instRegistry.queryFilter(issuerRevFilter, 0, 'latest')
+            certRegistry.queryFilter(certIssuedFilter, fromBlock, 'latest'),
+            certRegistry.queryFilter(certRevokedFilter, fromBlock, 'latest'),
+            certRegistry.queryFilter(certVersionFilter, fromBlock, 'latest'),
+            instRegistry.queryFilter(instRegFilter, fromBlock, 'latest'),
+            instRegistry.queryFilter(instDeactFilter, fromBlock, 'latest'),
+            instRegistry.queryFilter(issuerAuthFilter, fromBlock, 'latest'),
+            instRegistry.queryFilter(issuerRevFilter, fromBlock, 'latest')
         ]);
 
         console.log(`Discovered historical logs: ${issuedLogs.length} CertificateIssued, ${revokedLogs.length} CertificateRevoked, ${versionLogs.length} CertificateVersionCreated, ${instRegLogs.length} InstitutionRegistered, ${issuerAuthLogs.length} IssuerAuthorized.`);

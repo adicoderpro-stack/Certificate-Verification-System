@@ -54,16 +54,26 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static frontend assets
-app.use(express.static(path.join(__dirname, 'public')));
-
-// Health check endpoint for Render monitoring
+// --- Health Check & Root Endpoints (MUST be registered before static and other routes) ---
 app.get('/health', (req, res) => {
     res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
+
 app.get('/api/health', (req, res) => {
     res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
+
+app.get('/', (req, res) => {
+    res.status(200).json({
+        status: 'healthy',
+        service: 'CredChain Backend',
+        network: process.env.RPC_URL && process.env.RPC_URL.includes('sepolia') ? 'Sepolia' : 'Local/Custom',
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Serve static frontend assets
+app.use(express.static(path.join(__dirname, 'public')));
 
 // API Routes
 app.use('/api/auth', authRoutes);
@@ -78,20 +88,27 @@ async function startServer() {
     try {
         console.log('Initializing Database...');
         await initializeDatabase();
-
-        console.log('Connecting to Blockchain...');
-        await connectBlockchain();
-
-        console.log('Starting Event Synchronizer...');
-        await startEventSynchronizer();
-
-        app.listen(PORT, HOST, () => {
-            console.log(`Server is running on http://${HOST}:${PORT}`);
-        });
-    } catch (error) {
-        console.error('Failed to start server:', error);
-        process.exit(1);
+    } catch (dbErr) {
+        console.error('Database initialization warning:', dbErr);
     }
+
+    // Start HTTP server immediately so cloud platforms (Render, Railway, etc.) pass port checks
+    app.listen(PORT, HOST, () => {
+        console.log(`Server is running on http://${HOST}:${PORT}`);
+    });
+
+    // Asynchronously connect blockchain and start event synchronizer
+    (async () => {
+        try {
+            console.log('Connecting to Blockchain...');
+            await connectBlockchain();
+
+            console.log('Starting Event Synchronizer...');
+            await startEventSynchronizer();
+        } catch (chainErr) {
+            console.warn('Blockchain connection/synchronizer warning (server remains running):', chainErr.message || chainErr);
+        }
+    })();
 }
 
 startServer();
