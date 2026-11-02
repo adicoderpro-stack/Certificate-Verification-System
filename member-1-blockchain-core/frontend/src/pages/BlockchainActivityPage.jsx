@@ -126,12 +126,17 @@ export default function BlockchainActivityPage() {
         "event CertificateRevoked(string indexed certificateId)"
       ], blockchainService.provider);
 
-      const [e1, e2, e3, e4] = await Promise.all([
-        instReg.queryFilter(instReg.filters.InstitutionRegistered(), 0, "latest"),
-        instReg.queryFilter(instReg.filters.IssuerAuthorized(), 0, "latest"),
-        certReg.queryFilter(certReg.filters.CertificateIssued(), 0, "latest"),
-        certReg.queryFilter(certReg.filters.CertificateRevoked(), 0, "latest")
-      ]);
+      let e1 = [], e2 = [], e3 = [], e4 = [];
+      try {
+        const curBlock = await blockchainService.provider.getBlockNumber();
+        const startBlock = Math.max(0, curBlock - 5000);
+        [e1, e2, e3, e4] = await Promise.all([
+          instReg.queryFilter(instReg.filters.InstitutionRegistered(), startBlock, "latest").catch(() => []),
+          instReg.queryFilter(instReg.filters.IssuerAuthorized(), startBlock, "latest").catch(() => []),
+          certReg.queryFilter(certReg.filters.CertificateIssued(), startBlock, "latest").catch(() => []),
+          certReg.queryFilter(certReg.filters.CertificateRevoked(), startBlock, "latest").catch(() => [])
+        ]);
+      } catch (err) {}
 
       const parseArg = (val) => {
         if (typeof val === 'string') return val;
