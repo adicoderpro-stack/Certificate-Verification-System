@@ -1,5 +1,6 @@
 {
   "framework": "vite",
+  "installCommand": "cd member-1-blockchain-core/frontend && npm install",
   "buildCommand": "cd member-1-blockchain-core/frontend && npm run build",
   "outputDirectory": "member-1-blockchain-core/frontend/dist",
   "rewrites": [
@@ -9,4 +10,3 @@
     }
   ]
 }
-
