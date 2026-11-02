@@ -3,7 +3,36 @@ import { Card, HashDisplay } from '../components/common/Components';
 import { Search, CheckCircle, XCircle, AlertTriangle, Clock, Shield, ArrowLeft, Upload, FileText, Sun, Moon } from 'lucide-react';
 import { blockchainService } from '../services/blockchain';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
-import { ethers } from 'ethers';
+
+// Helper to auto-detect Certificate ID from uploaded PDF buffer
+function extractCertificateIdFromBuffer(arrayBuffer) {
+  if (!arrayBuffer) return null;
+  try {
+    const raw = new TextDecoder('latin1').decode(arrayBuffer);
+
+    // 1. Search for URL parameter id=... or certId=... in QR code link or text annotations
+    const urlMatch = raw.match(/(?:verify(?:\.html)?\?id=|id=|certId=)([\w\-]+)/i);
+    if (urlMatch && urlMatch[1] && urlMatch[1].length >= 3) {
+      return urlMatch[1];
+    }
+
+    // 2. Search for explicit Certificate ID patterns (e.g. Certificate ID: CERT-123)
+    const certIdMatch = raw.match(/(?:Certificate\s*ID\s*:?\s*|Cert\s*ID\s*:?\s*)([\w\-]+)/i);
+    if (certIdMatch && certIdMatch[1] && certIdMatch[1].length >= 3) {
+      return certIdMatch[1];
+    }
+
+    // 3. Search for standard CredChain ID prefixes (CERT_, CERT-, AUDIT_CERT_, ISO_CERT_)
+    const prefixMatch = raw.match(/\b(CERT[_\-][A-Za-z0-9_\-]+|AUDIT_CERT_[A-Za-z0-9_\-]+|ISO_CERT_[A-Za-z0-9_\-]+)\b/i);
+    if (prefixMatch && prefixMatch[1]) {
+      return prefixMatch[1];
+    }
+  } catch (e) {
+    console.warn("Could not parse PDF buffer for ID:", e);
+  }
+
+  return null;
+}
 
 export default function PublicVerification({ theme, toggleTheme }) {
   const [searchParams] = useSearchParams();
@@ -46,61 +75,77 @@ export default function PublicVerification({ theme, toggleTheme }) {
       setLoading(true);
       setResult(null);
 
-      const formData = new FormData();
-      if (certId.trim()) {
-        formData.append('certificateId', certId.trim());
+      // 1. Read file bytes and compute deterministic SHA-256 hash in-browser
+      const arrayBuffer = await selectedFile.arrayBuffer();
+      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const computedHash = "0x" + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+      // 2. Resolve Certificate ID (from manual input or auto-detect from PDF bytes)
+      let activeCertId = certId.trim();
+      if (!activeCertId) {
+        activeCertId = extractCertificateIdFromBuffer(arrayBuffer) || '';
       }
-      formData.append('pdf', selectedFile);
 
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-      const response = await fetch(`${API_URL}/api/certificates/verify`, {
-        method: 'POST',
-        body: formData
-      });
-
-      const data = await response.json();
-
-      if (data.requiresManualId) {
+      if (!activeCertId) {
         setResult({
           status: 'MANUAL_ID_REQUIRED',
-          message: data.message || 'Credential ID could not be detected from this PDF. Enter it manually.'
+          message: 'Credential ID could not be detected automatically from this PDF. Please enter it manually in the input above.'
         });
         return;
       }
 
-      if (!response.ok && data.error && !data.status) {
-        throw new Error(data.error || 'Verification request failed');
-      }
+      // 3. Direct on-chain verification query (requires ZERO wallet connection!)
+      const statusText = await blockchainService.verifyCertificate(activeCertId, computedHash);
 
-      const statusText = data.status || 'NOT_FOUND';
-      let version = data.version != null ? data.version.toString() : '-';
+      // 4. Fetch on-chain details if record exists
+      let version = '-';
       let details = null;
-
-      const activeCertId = data.certificateId || certId.trim();
 
       if (['VALID', 'TAMPERED', 'REVOKED', 'EXPIRED'].includes(statusText) && activeCertId) {
         try {
           const cert = await blockchainService.getCertificate(activeCertId);
           if (cert && (cert[7] ?? cert.exists)) {
+            version = (cert[6] ?? cert.version ?? 1).toString();
             details = {
               id: String(cert[0] || cert.certificateId || activeCertId),
               hash: String(cert[1] || cert.certificateHash || ''),
               issuer: String(cert[2] || cert.issuer || ''),
               expiry: (cert[4] ?? cert.expiryTimestamp ?? 0).toString(),
               status: Number(cert[5] ?? cert.status ?? 0),
-              version: (cert[6] ?? cert.version ?? 1).toString()
+              version: version
             };
           }
         } catch (err) {
-          console.log("Could not fetch details", err);
+          console.warn("Could not fetch full on-chain details:", err);
         }
       }
 
-      setResult({ status: statusText, version, details, certificateId: activeCertId });
+      // 5. Optional backend telemetry log (non-blocking)
+      const API_URL = import.meta.env.VITE_API_URL;
+      if (API_URL) {
+        try {
+          const formData = new FormData();
+          formData.append('certificateId', activeCertId);
+          formData.append('pdf', selectedFile);
+          fetch(`${API_URL}/api/certificates/verify`, {
+            method: 'POST',
+            body: formData
+          }).catch(() => {});
+        } catch (e) {}
+      }
+
+      setResult({
+        status: statusText,
+        version,
+        details,
+        certificateId: activeCertId,
+        computedHash
+      });
 
     } catch (err) {
       console.error('Verification error:', err);
-      setResult({ status: 'ERROR', message: err.message });
+      setResult({ status: 'ERROR', message: err.message || 'Verification failed' });
     } finally {
       setLoading(false);
     }
@@ -145,6 +190,12 @@ export default function PublicVerification({ theme, toggleTheme }) {
         title: "CREDENTIAL ID REQUIRED",
         desc: result.message || "Credential ID could not be detected automatically from this PDF. Please enter it manually in the input above.",
         color: "var(--warning)", bg: "var(--warning-bg)"
+      },
+      ERROR: {
+        icon: <AlertTriangle size={56} color="var(--danger)" />,
+        title: "VERIFICATION ERROR",
+        desc: result.message || "An error occurred while connecting to the blockchain.",
+        color: "var(--danger)", bg: "var(--danger-bg)"
       }
     };
 

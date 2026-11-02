@@ -151,9 +151,19 @@ export default function Certificates() {
     }
   };
 
+  const getApiUrl = () => {
+    if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+    if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      return 'http://localhost:3000';
+    }
+    return '';
+  };
+
   const fetchFreshAuthToken = async () => {
+    const apiUrl = getApiUrl();
+    if (!apiUrl) return null;
     try {
-      const res = await fetch('http://localhost:3000/api/auth/login', {
+      const res = await fetch(`${apiUrl}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: 'admin', password: 'admin123' })
@@ -203,7 +213,7 @@ export default function Certificates() {
         setTxStatus('confirmed');
 
         // Sync metadata
-        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+        const API_URL = getApiUrl();
         const syncForm = new FormData();
         syncForm.append('institutionId', formData.instId.trim());
         syncForm.append('certificateId', formData.certId.trim());
@@ -238,7 +248,7 @@ export default function Certificates() {
         });
       } else {
         // Default CredChain Managed Signing flow (No MetaMask needed!)
-        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+        const API_URL = getApiUrl();
         const issueForm = new FormData();
         issueForm.append('institutionId', formData.instId.trim());
         issueForm.append('certificateId', formData.certId.trim());
@@ -319,7 +329,7 @@ export default function Certificates() {
 
     try {
       setTxStatus('submitted');
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+      const API_URL = getApiUrl();
       let token = await getAuthToken();
 
       let response = await fetch(`${API_URL}/api/certificates/revoke`, {

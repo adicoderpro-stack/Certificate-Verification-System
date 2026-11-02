@@ -2,9 +2,13 @@ Write-Host "===================================================" -ForegroundColo
 Write-Host "Starting CredChain Services" -ForegroundColor Cyan
 Write-Host "===================================================" -ForegroundColor Cyan
 
+$coreDir = Join-Path $PSScriptRoot "member-1-blockchain-core"
+$appDir = Join-Path $PSScriptRoot "member-2-blockchain-application"
+$frontendDir = Join-Path $PSScriptRoot "member-1-blockchain-core\frontend"
+
 # 1. Start Hardhat Node in a standalone PowerShell window
 Write-Host "[1/4] Launching Hardhat Blockchain Node on port 8545..." -ForegroundColor Yellow
-Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Write-Host 'CredChain Hardhat Blockchain Node' -ForegroundColor Cyan; cd 'c:\Blockchain Project\Certificate-Verification-System\member-1-blockchain-core'; npx hardhat node"
+Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Write-Host 'CredChain Hardhat Blockchain Node' -ForegroundColor Cyan; cd '$coreDir'; npx hardhat node"
 
 # Wait for Hardhat Node to come online on port 8545
 Write-Host "Waiting for blockchain node to listen on port 8545..." -ForegroundColor Yellow
@@ -28,12 +32,12 @@ Write-Host "Hardhat node is live on port 8545!" -ForegroundColor Green
 
 # 2. Deploy Smart Contracts
 Write-Host "[2/4] Deploying Smart Contracts..." -ForegroundColor Yellow
-cd "c:\Blockchain Project\Certificate-Verification-System\member-1-blockchain-core"
+cd $coreDir
 npx hardhat run scripts/deploy.js --network localhost
 
 # 3. Start Member 2 Backend Server in standalone window
 Write-Host "[3/4] Launching Member 2 Backend on port 3000..." -ForegroundColor Yellow
-Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Write-Host 'CredChain Member 2 Backend Server' -ForegroundColor Cyan; cd 'c:\Blockchain Project\Certificate-Verification-System\member-2-blockchain-application'; node server.js"
+Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Write-Host 'CredChain Member 2 Backend Server' -ForegroundColor Cyan; cd '$appDir'; node server.js"
 
 # Wait for Backend to listen on port 3000
 $retries = 20
@@ -56,7 +60,7 @@ Write-Host "Backend server is live on port 3000!" -ForegroundColor Green
 
 # 4. Start Member 1 React Platform in standalone window
 Write-Host "[4/4] Launching Member 1 React Frontend on port 5173..." -ForegroundColor Yellow
-Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Write-Host 'CredChain React Frontend' -ForegroundColor Cyan; cd 'c:\Blockchain Project\Certificate-Verification-System\member-1-blockchain-core\frontend'; npm run dev"
+Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", "Write-Host 'CredChain React Frontend' -ForegroundColor Cyan; cd '$frontendDir'; npm run dev"
 
 # Wait for Frontend to listen on port 5173
 $retries = 20

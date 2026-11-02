@@ -30,14 +30,24 @@ export async function connectBlockchain() {
     provider = new ethers.JsonRpcProvider(process.env.RPC_URL || 'http://127.0.0.1:8545');
     signer = new ethers.Wallet(process.env.PRIVATE_KEY || '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80', provider);
 
-    // Read ABIs directly from member-1
-    const digitalCredentialAbiPath = path.resolve(__dirname, '../../../member-1-blockchain-core/artifacts/contracts/DigitalCredential.sol/DigitalCredential.json');
-    const certificateRegistryAbiPath = path.resolve(__dirname, '../../../member-1-blockchain-core/artifacts/contracts/CertificateRegistry.sol/CertificateRegistry.json');
-    const institutionRegistryAbiPath = path.resolve(__dirname, '../../../member-1-blockchain-core/artifacts/contracts/InstitutionRegistry.sol/InstitutionRegistry.json');
-    
-    const dcData = JSON.parse(fs.readFileSync(digitalCredentialAbiPath, 'utf8'));
-    const crData = JSON.parse(fs.readFileSync(certificateRegistryAbiPath, 'utf8'));
-    const irData = JSON.parse(fs.readFileSync(institutionRegistryAbiPath, 'utf8'));
+    // Load self-contained ABIs directly from local contracts directory
+    const contractsDir = fileURLToPath(new URL('../contracts', import.meta.url));
+
+    function loadAbi(filename) {
+        const filePath = path.join(contractsDir, filename);
+        if (!fs.existsSync(filePath)) {
+            throw new Error('ABI file not found: ' + filePath);
+        }
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        if (!data.abi || !Array.isArray(data.abi)) {
+            throw new Error('Invalid ABI format in ' + filename + ': missing abi array');
+        }
+        return data;
+    }
+
+    const dcData = loadAbi('DigitalCredential.json');
+    const crData = loadAbi('CertificateRegistry.json');
+    const irData = loadAbi('InstitutionRegistry.json');
 
     digitalCredentialContract = new ethers.Contract(
         process.env.DIGITAL_CREDENTIAL_ADDRESS,

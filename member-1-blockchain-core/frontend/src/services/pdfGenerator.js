@@ -16,7 +16,7 @@ export async function generateCertificatePDF({
   verifyUrl
 }) {
   const baseUrl = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_VERIFY_URL)
-    || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000');
+    || (typeof window !== 'undefined' ? window.location.origin : '');
   const targetUrl = verifyUrl || `${baseUrl}/verify?id=${encodeURIComponent(certId)}`;
 
   // 1. Generate QR Code image as Data URL

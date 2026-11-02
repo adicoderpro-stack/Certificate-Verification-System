@@ -1,11 +1,17 @@
 import hre from "hardhat";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 async function main() {
   const [deployer] = await hre.ethers.getSigners();
   if (!deployer) {
     throw new Error(
       `No deployer account found for network "${hre.network.name}". ` +
-      `Ensure PRIVATE_KEY or SEPOLIA_PRIVATE_KEY is configured in .env for remote networks.`
+      `Ensure SEPOLIA_PRIVATE_KEY or PRIVATE_KEY is configured in .env for remote networks.`
     );
   }
 
@@ -56,6 +62,22 @@ async function main() {
   await linkTx.wait();
   console.log(`  -> Facade linked successfully (Tx: ${linkTx.hash})`);
 
+  // 5. Save addresses to JSON summary
+  const deploymentSummary = {
+    network: hre.network.name,
+    chainId: Number(network.chainId),
+    deployer: deployer.address,
+    timestamp: new Date().toISOString(),
+    contracts: {
+      InstitutionRegistry: institutionRegistryAddress,
+      CertificateRegistry: certificateRegistryAddress,
+      DigitalCredential: digitalCredentialAddress
+    }
+  };
+
+  const summaryPath = path.resolve(__dirname, "../deployed-contracts.json");
+  fs.writeFileSync(summaryPath, JSON.stringify(deploymentSummary, null, 2));
+
   console.log("\n==================================================");
   console.log("DEPLOYMENT COMPLETE — CONFIGURED ADDRESSES");
   console.log("==================================================");
@@ -63,6 +85,17 @@ async function main() {
   console.log(`CERTIFICATE_REGISTRY_ADDRESS=${certificateRegistryAddress}`);
   console.log(`DIGITAL_CREDENTIAL_ADDRESS=${digitalCredentialAddress}`);
   console.log("==================================================");
+  console.log(`Saved deployment record to: ${summaryPath}`);
+
+  if (hre.network.name === "sepolia") {
+    console.log("\n==================================================");
+    console.log("ETHERSCAN VERIFICATION COMMANDS");
+    console.log("==================================================");
+    console.log(`npx hardhat verify --network sepolia ${institutionRegistryAddress}`);
+    console.log(`npx hardhat verify --network sepolia ${certificateRegistryAddress} "${institutionRegistryAddress}"`);
+    console.log(`npx hardhat verify --network sepolia ${digitalCredentialAddress} "${institutionRegistryAddress}" "${certificateRegistryAddress}"`);
+    console.log("==================================================");
+  }
 }
 
 main().catch((error) => {

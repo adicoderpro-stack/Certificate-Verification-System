@@ -27,9 +27,19 @@ export default function BlockchainActivityPage() {
     loadAuditEvents(page, selectedEventType, selectedSource, searchTerm);
   }, [page, selectedEventType, selectedSource, searchTerm, blockchainService.provider]);
 
+  const getApiUrl = () => {
+    if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+    if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      return 'http://localhost:3000';
+    }
+    return '';
+  };
+
   const fetchFreshAuthToken = async () => {
+    const apiUrl = getApiUrl();
+    if (!apiUrl) return null;
     try {
-      const res = await fetch('http://localhost:3000/api/auth/login', {
+      const res = await fetch(`${apiUrl}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: 'admin', password: 'admin123' })
@@ -71,7 +81,7 @@ export default function BlockchainActivityPage() {
         ...(search.trim() !== '' && { search: search.trim() })
       });
 
-      let res = await fetch(`http://localhost:3000/api/audit/events?${params.toString()}`, { headers });
+      let res = await fetch(`${apiUrl}/api/audit/events?${params.toString()}`, { headers });
 
       // If token was expired or invalid (401/403), clear stored tokens and retry with a fresh token
       if (res.status === 401 || res.status === 403) {
@@ -79,7 +89,7 @@ export default function BlockchainActivityPage() {
         localStorage.removeItem('credchain_token');
         token = await fetchFreshAuthToken();
         headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-        res = await fetch(`http://localhost:3000/api/audit/events?${params.toString()}`, { headers });
+        res = await fetch(`${apiUrl}/api/audit/events?${params.toString()}`, { headers });
       }
 
       if (!res.ok) {

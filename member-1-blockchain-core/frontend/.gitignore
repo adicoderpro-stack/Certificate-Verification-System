@@ -12,6 +12,14 @@ dist
 dist-ssr
 *.local
 
+# Environment & Secrets (NEVER commit to GitHub)
+.env
+.env.*
+.env.local
+.env.production
+.env.development
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -22,3 +30,5 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+.vercel

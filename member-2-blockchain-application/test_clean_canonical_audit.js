@@ -23,13 +23,12 @@ async function runCleanCanonicalAudit() {
         throw new Error(`FATAL: Expected Hardhat local chain ID 31337, got ${network.chainId}`);
     }
 
-    const rootDir = path.resolve(__dirname, '..');
-    const member1Dir = path.join(rootDir, 'member-1-blockchain-core');
     const member2Dir = __dirname;
+    const contractsDir = path.join(member2Dir, 'src/contracts');
 
-    const irAbi = JSON.parse(fs.readFileSync(path.join(member1Dir, 'artifacts/contracts/InstitutionRegistry.sol/InstitutionRegistry.json'), 'utf8')).abi;
-    const crAbi = JSON.parse(fs.readFileSync(path.join(member1Dir, 'artifacts/contracts/CertificateRegistry.sol/CertificateRegistry.json'), 'utf8')).abi;
-    const dcAbi = JSON.parse(fs.readFileSync(path.join(member1Dir, 'artifacts/contracts/DigitalCredential.sol/DigitalCredential.json'), 'utf8')).abi;
+    const irAbi = JSON.parse(fs.readFileSync(path.join(contractsDir, 'InstitutionRegistry.json'), 'utf8')).abi;
+    const crAbi = JSON.parse(fs.readFileSync(path.join(contractsDir, 'CertificateRegistry.json'), 'utf8')).abi;
+    const dcAbi = JSON.parse(fs.readFileSync(path.join(contractsDir, 'DigitalCredential.json'), 'utf8')).abi;
 
     const envContent = fs.readFileSync(path.join(member2Dir, '.env'), 'utf8');
     const irAddress = envContent.match(/INSTITUTION_REGISTRY_ADDRESS=(0x[0-9a-fA-F]+)/)[1];

@@ -2,12 +2,16 @@ import { ethers } from "ethers";
 import DigitalCredentialABI from "../contracts/DigitalCredential.json";
 import InstitutionRegistryABI from "../contracts/InstitutionRegistry.json";
 
-// In a real app these would be in .env, but for the local demo they can be configured here
-// Replace with the addresses deployed in your local node
+// Configured addresses with sensible fallback defaults (Sepolia deployed addresses)
 export const CONTRACT_ADDRESSES = {
-  institutionRegistry: import.meta.env.VITE_INSTITUTION_REGISTRY_ADDRESS || "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-  digitalCredential: import.meta.env.VITE_DIGITAL_CREDENTIAL_ADDRESS || "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+  institutionRegistry: import.meta.env.VITE_INSTITUTION_REGISTRY_ADDRESS || "0x74d706a420986021C52f5FcD78BbDF0e6D16bc8b",
+  digitalCredential: import.meta.env.VITE_DIGITAL_CREDENTIAL_ADDRESS || "0xd0f9074613351AE06f9b852Ac1aD30A59d927C66"
 };
+
+// Safe public Sepolia RPC fallback for read-only / public operations without wallet connection
+const DEFAULT_SEPOLIA_RPC = "https://ethereum-sepolia-rpc.publicnode.com";
+// VITE_RPC_URL takes priority (used for local Hardhat). VITE_SEPOLIA_RPC_URL is the Sepolia override.
+export const RPC_ENDPOINT = import.meta.env.VITE_RPC_URL || import.meta.env.VITE_SEPOLIA_RPC_URL || DEFAULT_SEPOLIA_RPC;
 
 export function getInjectedEthereumProvider() {
   if (typeof window === "undefined") return null;
@@ -26,17 +30,35 @@ export function getInjectedEthereumProvider() {
 
 class BlockchainService {
   constructor() {
-    this.provider = new ethers.JsonRpcProvider("http://127.0.0.1:8545");
+    this.readProvider = new ethers.JsonRpcProvider(RPC_ENDPOINT);
+    this.provider = this.readProvider;
     this.signer = null;
+
     this.digitalCredential = new ethers.Contract(
       CONTRACT_ADDRESSES.digitalCredential,
       DigitalCredentialABI.abi,
-      this.provider
+      this.readProvider
     );
     this.institutionRegistry = new ethers.Contract(
       CONTRACT_ADDRESSES.institutionRegistry,
       InstitutionRegistryABI.abi,
-      this.provider
+      this.readProvider
+    );
+  }
+
+  getReadContract() {
+    return this.digitalCredential || new ethers.Contract(
+      CONTRACT_ADDRESSES.digitalCredential,
+      DigitalCredentialABI.abi,
+      this.readProvider || this.provider
+    );
+  }
+
+  getReadInstitutionContract() {
+    return this.institutionRegistry || new ethers.Contract(
+      CONTRACT_ADDRESSES.institutionRegistry,
+      InstitutionRegistryABI.abi,
+      this.readProvider || this.provider
     );
   }
 
@@ -77,10 +99,10 @@ class BlockchainService {
       const chainIdHex = await ethereum.request({ method: 'eth_chainId' });
       const chainId = parseInt(chainIdHex, 16);
 
-      if (chainId === 31337) {
-        netName = "Hardhat Local";
-      } else if (chainId === 11155111) {
+      if (chainId === 11155111) {
         netName = "Ethereum Sepolia";
+      } else if (chainId === 31337) {
+        netName = "Hardhat Local";
       } else if (chainId === 1) {
         netName = "Mainnet";
       } else if (chainId === 1337 || chainId === 1338) {
@@ -91,7 +113,7 @@ class BlockchainService {
       }
     } catch (e) {
       const network = await this.provider.getNetwork();
-      netName = network.name === "unknown" ? "Localhost" : network.name;
+      netName = network.name === "unknown" ? "Ethereum Sepolia" : network.name;
     }
 
     return {
@@ -107,8 +129,8 @@ class BlockchainService {
 
   // --- Institution operations ---
   async registerInstitution(id, name, wallet) {
-    if (!this.institutionRegistry) throw new Error("Wallet not connected");
-    const contract = this.signer ? this.institutionRegistry.connect(this.signer) : this.institutionRegistry;
+    if (!this.signer) throw new Error("MetaMask wallet is not connected");
+    const contract = this.institutionRegistry.connect(this.signer);
     const tx = await contract.registerInstitution(id, name, wallet);
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
@@ -118,23 +140,24 @@ class BlockchainService {
           localStorage.setItem('credchain_registered_institutions', JSON.stringify(cached));
         }
       }
-    } catch(e) {}
+    } catch (e) { }
     return tx;
   }
 
   async authorizeIssuer(instId, issuerWallet) {
-    if (!this.institutionRegistry) throw new Error("Wallet not connected");
-    return await this.institutionRegistry.authorizeIssuer(instId, issuerWallet);
+    if (!this.signer) throw new Error("MetaMask wallet is not connected");
+    const contract = this.institutionRegistry.connect(this.signer);
+    return await contract.authorizeIssuer(instId, issuerWallet);
   }
 
   async getInstitution(instId) {
-    const contract = this.institutionRegistry || new ethers.Contract(CONTRACT_ADDRESSES.institutionRegistry, InstitutionRegistryABI.abi, this.provider);
+    const contract = this.getReadInstitutionContract();
     return await contract.getInstitution(instId);
   }
 
   async getAllRegisteredInstitutions() {
     const candidateIds = new Set();
-    const contract = this.institutionRegistry || new ethers.Contract(CONTRACT_ADDRESSES.institutionRegistry, InstitutionRegistryABI.abi, this.provider);
+    const contract = this.getReadInstitutionContract();
 
     // 1. Authoritative On-Chain Enumeration directly from the InstitutionRegistry smart contract
     try {
@@ -144,20 +167,31 @@ class BlockchainService {
           onChainIds.forEach(id => { if (id && typeof id === 'string') candidateIds.add(id); });
         }
       }
-    } catch(e) {}
+    } catch (e) { }
 
-    // 2. Discover from off-chain database certificates / fallback
+    // 2. Discover from optional off-chain backend if configured
+    const API_URL = import.meta.env.VITE_API_URL;
+    if (API_URL) {
+      try {
+        const res = await fetch(`${API_URL}/api/certificates`);
+        if (res.ok) {
+          const certs = await res.json();
+          certs.forEach(c => {
+            if (c.institutionId && !c.institutionId.startsWith('0x')) {
+              candidateIds.add(c.institutionId);
+            }
+          });
+        }
+      } catch (e) { }
+    }
+
+    // 3. Fallback to localStorage cache
     try {
-      const res = await fetch('http://localhost:3000/api/certificates');
-      if (res.ok) {
-        const certs = await res.json();
-        certs.forEach(c => {
-          if (c.institutionId && !c.institutionId.startsWith('0x')) {
-            candidateIds.add(c.institutionId);
-          }
-        });
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const cached = JSON.parse(localStorage.getItem('credchain_registered_institutions') || '[]');
+        cached.forEach(id => { if (id) candidateIds.add(id); });
       }
-    } catch(e) {}
+    } catch (e) { }
 
     const list = [];
     for (const instId of candidateIds) {
@@ -174,7 +208,7 @@ class BlockchainService {
             exists: true
           });
         }
-      } catch (err) {}
+      } catch (err) { }
     }
 
     return list;
@@ -182,10 +216,9 @@ class BlockchainService {
 
   async getAllAuthorizedIssuers() {
     const institutions = await this.getAllRegisteredInstitutions();
-    const contract = this.institutionRegistry || new ethers.Contract(CONTRACT_ADDRESSES.institutionRegistry, InstitutionRegistryABI.abi, this.provider);
+    const contract = this.getReadInstitutionContract();
     const candidateWallets = new Set();
 
-    // Discover authorized issuer wallets from institution admin wallets and on-chain events
     institutions.forEach(inst => {
       if (inst.wallet && inst.wallet !== '0x0000000000000000000000000000000000000000' && inst.wallet !== '0x000') {
         candidateWallets.add(inst.wallet);
@@ -197,7 +230,7 @@ class BlockchainService {
       authEvents.forEach(e => {
         if (e.args && e.args[1]) candidateWallets.add(e.args[1]);
       });
-    } catch(e) {}
+    } catch (e) { }
 
     const issuersList = [];
     for (const inst of institutions) {
@@ -214,14 +247,14 @@ class BlockchainService {
               isPrimary
             });
           }
-        } catch(e) {}
+        } catch (e) { }
       }
     }
     return issuersList;
   }
 
   async isAuthorizedIssuer(instId, issuerWallet) {
-    const contract = this.institutionRegistry || new ethers.Contract(CONTRACT_ADDRESSES.institutionRegistry, InstitutionRegistryABI.abi, this.provider);
+    const contract = this.getReadInstitutionContract();
 
     try {
       const inst = await contract.getInstitution(instId);
@@ -230,8 +263,6 @@ class BlockchainService {
       }
 
       const isAuth = await contract.isAuthorizedIssuer(instId, issuerWallet);
-
-      // If isAuth is true OR if connected wallet matches institution primary wallet
       const isPrimaryWallet = inst.wallet && inst.wallet.toLowerCase() === issuerWallet.toLowerCase();
 
       if (isAuth || isPrimaryWallet) {
@@ -254,29 +285,31 @@ class BlockchainService {
     return await contract.issueCertificate(instId, certId, hash, expiry);
   }
 
+  // Pure on-chain read: Works WITHOUT requiring wallet connection!
   async verifyCertificate(certId, hash) {
-    if (!this.digitalCredential) throw new Error("Wallet not connected");
-    return await this.digitalCredential.verifyCertificate(certId, hash);
+    const contract = this.getReadContract();
+    return await contract.verifyCertificate(certId, hash);
   }
 
+  // Pure on-chain read: Works WITHOUT requiring wallet connection!
   async getCertificate(certId) {
-    const contract = this.digitalCredential || new ethers.Contract(CONTRACT_ADDRESSES.digitalCredential, DigitalCredentialABI.abi, this.provider);
+    const contract = this.getReadContract();
     return await contract.getCertificate(certId);
   }
 
   async getCertificateVersion(certId, version) {
-    const contract = this.digitalCredential || new ethers.Contract(CONTRACT_ADDRESSES.digitalCredential, DigitalCredentialABI.abi, this.provider);
+    const contract = this.getReadContract();
     return await contract.getCertificateVersion(certId, version);
   }
 
   async getCertificateVersionCount(certId) {
-    const contract = this.digitalCredential || new ethers.Contract(CONTRACT_ADDRESSES.digitalCredential, DigitalCredentialABI.abi, this.provider);
+    const contract = this.getReadContract();
     return await contract.getCertificateVersionCount(certId);
   }
 
   async getCredentials() {
     const discoveredIds = new Set();
-    const contract = this.digitalCredential || new ethers.Contract(CONTRACT_ADDRESSES.digitalCredential, DigitalCredentialABI.abi, this.provider);
+    const contract = this.getReadContract();
 
     // 1. Authoritative On-Chain Enumeration from CertificateRegistry
     try {
@@ -286,17 +319,20 @@ class BlockchainService {
           onChainIds.forEach(id => { if (id && typeof id === 'string') discoveredIds.add(id); });
         }
       }
-    } catch(e) {}
+    } catch (e) { }
 
-    // 2. Off-chain database certificates
+    // 2. Off-chain database certificates (if configured)
     let certList = [];
-    try {
-      const res = await fetch('http://localhost:3000/api/certificates');
-      if (res.ok) {
-        certList = await res.json();
-        certList.forEach(c => { if (c.id && !c.id.startsWith('0x')) discoveredIds.add(c.id); });
-      }
-    } catch (e) {}
+    const API_URL = import.meta.env.VITE_API_URL;
+    if (API_URL) {
+      try {
+        const res = await fetch(`${API_URL}/api/certificates`);
+        if (res.ok) {
+          certList = await res.json();
+          certList.forEach(c => { if (c.id && !c.id.startsWith('0x')) discoveredIds.add(c.id); });
+        }
+      } catch (e) { }
+    }
 
     const enriched = [];
     const nowSec = Math.floor(Date.now() / 1000);
@@ -324,7 +360,7 @@ class BlockchainService {
             hash: String(onChain[1] || onChain.certificateHash || '')
           });
         }
-      } catch (err) {}
+      } catch (err) { }
     }
 
     return enriched;
@@ -332,8 +368,6 @@ class BlockchainService {
 
   // Event and credentials parsing for Dashboard & Lists
   async getAllEvents() {
-    if (!this.provider || !this.digitalCredential) return { issued: [], revoked: [], expired: [], institutions: 0 };
-
     const [institutionsList, credentials] = await Promise.all([
       this.getAllRegisteredInstitutions(),
       this.getCredentials()
@@ -361,21 +395,23 @@ class BlockchainService {
     }));
 
     return {
-       issued,
-       revoked,
-       expired,
-       institutions: activeInstitutionsCount
+      issued,
+      revoked,
+      expired,
+      institutions: activeInstitutionsCount
     };
   }
 
   async revokeCertificate(instId, certId) {
-    if (!this.digitalCredential) throw new Error("Wallet not connected");
-    return await this.digitalCredential.revokeCertificate(instId, certId);
+    if (!this.signer) throw new Error("MetaMask wallet is not connected");
+    const contract = this.digitalCredential.connect(this.signer);
+    return await contract.revokeCertificate(instId, certId);
   }
 
   async createNewVersion(instId, certId, newHash, newExpiry) {
-    if (!this.digitalCredential) throw new Error("Wallet not connected");
-    return await this.digitalCredential.createNewVersion(instId, certId, newHash, newExpiry);
+    if (!this.signer) throw new Error("MetaMask wallet is not connected");
+    const contract = this.digitalCredential.connect(this.signer);
+    return await contract.createNewVersion(instId, certId, newHash, newExpiry);
   }
 }
 

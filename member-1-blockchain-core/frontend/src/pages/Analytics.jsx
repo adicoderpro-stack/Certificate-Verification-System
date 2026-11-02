@@ -44,9 +44,19 @@ export default function Analytics() {
     loadAnalytics();
   }, [blockchainService.provider]);
 
+  const getApiUrl = () => {
+    if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+    if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      return 'http://localhost:3000';
+    }
+    return '';
+  };
+
   const fetchFreshAuthToken = async () => {
+    const apiUrl = getApiUrl();
+    if (!apiUrl) return null;
     try {
-      const res = await fetch('http://localhost:3000/api/auth/login', {
+      const res = await fetch(`${apiUrl}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: 'admin', password: 'admin123' })
@@ -77,84 +87,86 @@ export default function Analytics() {
       setLoading(true);
       setError(null);
 
-      let token = await getAuthToken();
-      let headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-
-      // Fetch summary and trend datasets
-      let [sumRes, issueTrendRes, verifyTrendRes, resultsRes, instRes, activityRes] = await Promise.allSettled([
-        fetch('http://localhost:3000/api/analytics/summary', { headers }),
-        fetch('http://localhost:3000/api/analytics/issuance-trends', { headers }),
-        fetch('http://localhost:3000/api/analytics/verification-trends', { headers }),
-        fetch('http://localhost:3000/api/analytics/verification-results', { headers }),
-        fetch('http://localhost:3000/api/analytics/institutions', { headers }),
-        fetch('http://localhost:3000/api/analytics/recent-activity', { headers })
-      ]);
-
-      // Check if auth expired (401/403)
-      if (sumRes.status === 'fulfilled' && (sumRes.value.status === 401 || sumRes.value.status === 403)) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('credchain_token');
-        token = await fetchFreshAuthToken();
-        headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-        [sumRes, issueTrendRes, verifyTrendRes, resultsRes, instRes, activityRes] = await Promise.allSettled([
-          fetch('http://localhost:3000/api/analytics/summary', { headers }),
-          fetch('http://localhost:3000/api/analytics/issuance-trends', { headers }),
-          fetch('http://localhost:3000/api/analytics/verification-trends', { headers }),
-          fetch('http://localhost:3000/api/analytics/verification-results', { headers }),
-          fetch('http://localhost:3000/api/analytics/institutions', { headers }),
-          fetch('http://localhost:3000/api/analytics/recent-activity', { headers })
-        ]);
-      }
-
+      const apiUrl = getApiUrl();
       let backendOk = false;
 
-      if (sumRes.status === 'fulfilled' && sumRes.value.ok) {
-        const data = await sumRes.value.json();
-        setSummary(data);
-        backendOk = true;
-      }
+      if (apiUrl) {
+        try {
+          let token = await getAuthToken();
+          let headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
-      if (issueTrendRes.status === 'fulfilled' && issueTrendRes.value.ok) {
-        const data = await issueTrendRes.value.json();
-        setIssuanceTrends(Array.isArray(data) ? data : []);
-      }
+          // Fetch summary and trend datasets
+          let [sumRes, issueTrendRes, verifyTrendRes, resultsRes, instRes, activityRes] = await Promise.allSettled([
+            fetch(`${apiUrl}/api/analytics/summary`, { headers }),
+            fetch(`${apiUrl}/api/analytics/issuance-trends`, { headers }),
+            fetch(`${apiUrl}/api/analytics/verification-trends`, { headers }),
+            fetch(`${apiUrl}/api/analytics/verification-results`, { headers }),
+            fetch(`${apiUrl}/api/analytics/institutions`, { headers }),
+            fetch(`${apiUrl}/api/analytics/recent-activity`, { headers })
+          ]);
 
-      if (verifyTrendRes.status === 'fulfilled' && verifyTrendRes.value.ok) {
-        const data = await verifyTrendRes.value.json();
-        setVerificationTrends(Array.isArray(data) ? data : []);
-      }
+          // Check if auth expired (401/403)
+          if (sumRes.status === 'fulfilled' && (sumRes.value.status === 401 || sumRes.value.status === 403)) {
+            localStorage.removeItem('token');
+            localStorage.removeItem('credchain_token');
+            token = await fetchFreshAuthToken();
+            headers = token ? { 'Authorization': Bearer  } : {};
+            [sumRes, issueTrendRes, verifyTrendRes, resultsRes, instRes, activityRes] = await Promise.allSettled([
+              fetch(`${apiUrl}/api/analytics/summary`, { headers }),
+              fetch(`${apiUrl}/api/analytics/issuance-trends`, { headers }),
+              fetch(`${apiUrl}/api/analytics/verification-trends`, { headers }),
+              fetch(`${apiUrl}/api/analytics/verification-results`, { headers }),
+              fetch(`${apiUrl}/api/analytics/institutions`, { headers }),
+              fetch(`${apiUrl}/api/analytics/recent-activity`, { headers })
+            ]);
+          }
 
-      if (resultsRes.status === 'fulfilled' && resultsRes.value.ok) {
-        const data = await resultsRes.value.json();
-        setVerificationResults(data || {});
-      }
+          if (sumRes.status === 'fulfilled' && sumRes.value.ok) {
+            const data = await sumRes.value.json();
+            setSummary(data);
+            backendOk = true;
+          }
 
-      if (instRes.status === 'fulfilled' && instRes.value.ok) {
-        const data = await instRes.value.json();
-        setInstitutions(Array.isArray(data) ? data : []);
-      }
+          if (issueTrendRes.status === 'fulfilled' && issueTrendRes.value.ok) {
+            const data = await issueTrendRes.value.json();
+            setIssuanceTrends(Array.isArray(data) ? data : []);
+          }
 
-      if (activityRes.status === 'fulfilled' && activityRes.value.ok) {
-        const data = await activityRes.value.json();
-        setRecentActivity({
-          recentIssuances: data.recentIssuances || [],
-          recentRevocations: data.recentRevocations || [],
-          recentVerifications: data.recentVerifications || []
-        });
+          if (verifyTrendRes.status === 'fulfilled' && verifyTrendRes.value.ok) {
+            const data = await verifyTrendRes.value.json();
+            setVerificationTrends(Array.isArray(data) ? data : []);
+          }
+
+          if (resultsRes.status === 'fulfilled' && resultsRes.value.ok) {
+            const data = await resultsRes.value.json();
+            setVerificationResults(data || {});
+          }
+
+          if (instRes.status === 'fulfilled' && instRes.value.ok) {
+            const data = await instRes.value.json();
+            setInstitutions(Array.isArray(data) ? data : []);
+          }
+
+          if (activityRes.status === 'fulfilled' && activityRes.value.ok) {
+            const data = await activityRes.value.json();
+            setRecentActivity({
+              recentIssuances: data.recentIssuances || [],
+              recentRevocations: data.recentRevocations || [],
+              recentVerifications: data.recentVerifications || []
+            });
+          }
+        } catch (apiErr) {
+          console.warn('Backend API query notice:', apiErr.message);
+        }
       }
 
       // If backend was not reached or returned empty, fallback to contract state
-      if (!backendOk && blockchainService.provider) {
+      if (!backendOk) {
         await loadContractFallback();
       }
     } catch (err) {
       console.error('Error loading analytics data:', err);
-      // Fallback
-      if (blockchainService.provider) {
-        await loadContractFallback();
-      } else {
-        setError('Failed to fetch analytics data. Ensure backend API (port 3000) and Hardhat RPC (port 8545) are running.');
-      }
+      await loadContractFallback();
     } finally {
       setLoading(false);
       setIsRefreshing(false);
