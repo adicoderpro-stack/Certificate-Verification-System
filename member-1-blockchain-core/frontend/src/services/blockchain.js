@@ -169,11 +169,14 @@ class BlockchainService {
       }
     } catch (e) { }
 
-    // 2. Discover from optional off-chain backend if configured
+    // 2. Discover from optional off-chain backend if configured (with 2s timeout)
     const API_URL = import.meta.env.VITE_API_URL;
     if (API_URL) {
       try {
-        const res = await fetch(`${API_URL}/api/certificates`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        const res = await fetch(`${API_URL}/api/certificates`, { signal: controller.signal });
+        clearTimeout(timeoutId);
         if (res.ok) {
           const certs = await res.json();
           certs.forEach(c => {
@@ -321,12 +324,15 @@ class BlockchainService {
       }
     } catch (e) { }
 
-    // 2. Off-chain database certificates (if configured)
+    // 2. Off-chain database certificates (if configured, with 2s timeout)
     let certList = [];
     const API_URL = import.meta.env.VITE_API_URL;
     if (API_URL) {
       try {
-        const res = await fetch(`${API_URL}/api/certificates`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        const res = await fetch(`${API_URL}/api/certificates`, { signal: controller.signal });
+        clearTimeout(timeoutId);
         if (res.ok) {
           certList = await res.json();
           certList.forEach(c => { if (c.id && !c.id.startsWith('0x')) discoveredIds.add(c.id); });
