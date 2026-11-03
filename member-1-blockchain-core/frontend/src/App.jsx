@@ -39,12 +39,14 @@ function App() {
 
   const connect = async () => {
     try {
-      const data = await blockchainService.connectWallet();
+      const data = await blockchainService.connectWallet(true);
       setWallet(data.address);
       setNetwork(data.network);
     } catch (err) {
-      console.error('Wallet connection error:', err);
-      alert(err.message || "Failed to connect wallet.");
+      console.warn('MetaMask not detected, falling back to Institutional Signer:', err.message);
+      const demo = await blockchainService.connectDemoSigner();
+      setWallet(demo.address);
+      setNetwork(demo.network);
     }
   };
 
