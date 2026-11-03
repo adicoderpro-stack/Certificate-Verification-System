@@ -241,12 +241,12 @@ export function Header({ wallet, network, connect, theme, toggleTheme }) {
 
         {/* Web3 Signing Authority Indicator */}
         {wallet ? (
-          <Badge type="success" style={{ fontSize: '0.78rem', padding: '0.35rem 0.6rem' }} title="Web3 cryptographic signer is active and ready.">
-            <ShieldCheck size={13} style={{ marginRight: '4px', verticalAlign: 'text-bottom' }} /> Signer Active
+          <Badge type="success" style={{ fontSize: '0.78rem', padding: '0.35rem 0.6rem' }} title="MetaMask Web3 signer is active and ready.">
+            <ShieldCheck size={13} style={{ marginRight: '4px', verticalAlign: 'text-bottom' }} /> Web3 Signer Active
           </Badge>
         ) : (
-          <Badge type="info" style={{ fontSize: '0.78rem', padding: '0.35rem 0.6rem' }} title="Web3 cryptographic signing is ready. Connect MetaMask or use the institutional signer.">
-            <Shield size={13} style={{ marginRight: '4px', verticalAlign: 'text-bottom' }} /> Web3 Signing Ready
+          <Badge type="warning" style={{ fontSize: '0.78rem', padding: '0.35rem 0.6rem' }} title="MetaMask Web3 wallet connection is strictly required to issue or revoke credentials.">
+            <AlertTriangle size={13} style={{ marginRight: '4px', verticalAlign: 'text-bottom' }} /> MetaMask Required
           </Badge>
         )}
 
@@ -274,8 +274,8 @@ export function Header({ wallet, network, connect, theme, toggleTheme }) {
              </div>
           </div>
         ) : (
-          <button className="btn btn-primary" onClick={connect} style={{ fontSize: '0.82rem', padding: '0.4rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem', background: '#f97316', borderColor: '#f97316', fontWeight: 600 }} title="Connect MetaMask or Institutional Web3 Signer">
-            <Wallet size={14} /> Connect Signer
+          <button className="btn btn-primary" onClick={connect} style={{ fontSize: '0.82rem', padding: '0.4rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem', background: '#f97316', borderColor: '#f97316', fontWeight: 600 }} title="Connect MetaMask Web3 wallet to sign credential issuance and revocation">
+            <Wallet size={14} /> Connect MetaMask
           </button>
         )}
       </div>

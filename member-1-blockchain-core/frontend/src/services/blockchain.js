@@ -62,51 +62,17 @@ class BlockchainService {
     );
   }
 
-  async connectDemoSigner() {
-    // Accredited Institutional Issuer wallet (DEMO_INST_01: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8)
-    const demoSigner = new ethers.Wallet(
-      "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
-      this.readProvider || this.provider
-    );
-    this.signer = demoSigner;
-    this.digitalCredential = new ethers.Contract(
-      CONTRACT_ADDRESSES.digitalCredential,
-      DigitalCredentialABI.abi,
-      demoSigner
-    );
-    this.institutionRegistry = new ethers.Contract(
-      CONTRACT_ADDRESSES.institutionRegistry,
-      InstitutionRegistryABI.abi,
-      demoSigner
-    );
-    const address = await demoSigner.getAddress();
-    return {
-      address,
-      network: "Ethereum Sepolia (Institutional Signer)",
-      isDemo: true
-    };
-  }
-
-  async connectWallet(autoFallback = true) {
+  async connectWallet() {
     const ethereum = getInjectedEthereumProvider();
     if (!ethereum) {
-      if (autoFallback) {
-        return this.connectDemoSigner();
-      }
-      throw new Error("No Web3 wallet extension detected. Please install MetaMask to connect your wallet.");
+      throw new Error("MetaMask Web3 extension not detected. Please install MetaMask from https://metamask.io to connect your wallet.");
     }
 
     try {
       await ethereum.request({ method: "eth_requestAccounts" });
     } catch (err) {
       if (err && (err.code === 4001 || err.code === 'ACTION_REJECTED' || (err.message && err.message.includes('rejected')))) {
-        if (autoFallback) {
-          return this.connectDemoSigner();
-        }
         throw new Error("Wallet connection request was rejected in MetaMask.");
-      }
-      if (autoFallback) {
-        return this.connectDemoSigner();
       }
       throw new Error(err.message || "Failed to request accounts from wallet.");
     }
