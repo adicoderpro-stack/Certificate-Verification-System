@@ -137,6 +137,28 @@ export default function Verification() {
         }
       }
 
+      // Record verification & tampering events into persistent Audit Trail history
+      try {
+        const auditRecord = {
+          id: `audit-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+          source: 'application',
+          eventType: statusText === 'TAMPERED' ? 'Credential Tampered' : 'Credential Verified',
+          status: statusText,
+          certificateId: resolvedCertId,
+          institutionId: 'DEMO_INST_01',
+          issuer: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+          timestamp: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          computedHash: computedHash || '',
+          version: version || 1,
+          ipAddress: '127.0.0.1 (Workspace Verification Engine)',
+          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'Browser Client'
+        };
+        const past = JSON.parse(localStorage.getItem('credchain_audit_verifications') || '[]');
+        past.unshift(auditRecord);
+        localStorage.setItem('credchain_audit_verifications', JSON.stringify(past.slice(0, 100)));
+      } catch (e) {}
+
       setResult({
         status: statusText || 'NOT_FOUND',
         version: version,

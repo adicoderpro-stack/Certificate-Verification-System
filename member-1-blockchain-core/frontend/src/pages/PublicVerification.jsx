@@ -157,6 +157,29 @@ export default function PublicVerification({ theme, toggleTheme }) {
         }
       }
 
+      // Record verification & tampering events into persistent Audit Trail history
+      try {
+        const auditRecord = {
+          id: `audit-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+          source: 'application',
+          eventType: statusText === 'TAMPERED' ? 'Credential Tampered' : 'Credential Verified',
+          status: statusText,
+          certificateId: resolvedCertId,
+          institutionId: details?.institutionId || 'DEMO_INST_01',
+          issuer: details?.issuer || '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+          timestamp: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          computedHash: computedHash || '',
+          targetHash: details?.hash || '',
+          version: version || 1,
+          ipAddress: '127.0.0.1 (Public Verification Portal)',
+          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'Browser Client'
+        };
+        const past = JSON.parse(localStorage.getItem('credchain_audit_verifications') || '[]');
+        past.unshift(auditRecord);
+        localStorage.setItem('credchain_audit_verifications', JSON.stringify(past.slice(0, 100)));
+      } catch (e) {}
+
       setResult({
         status: statusText,
         version,

@@ -20,8 +20,15 @@ export const getAuditEvents = async (req, res) => {
         }
 
         if (eventType && eventType.trim() !== '' && eventType.toUpperCase() !== 'ALL') {
-            whereClauses.push('eventType = ?');
-            params.push(eventType.trim());
+            const ev = eventType.trim();
+            if (ev === 'Credential Tampered') {
+                whereClauses.push("(eventType = 'Credential Tampered' OR status = 'TAMPERED')");
+            } else if (ev === 'Credential Verified') {
+                whereClauses.push("(eventType = 'Credential Verified' AND (status IS NULL OR status != 'TAMPERED'))");
+            } else {
+                whereClauses.push('eventType = ?');
+                params.push(ev);
+            }
         }
 
         if (certificateId && certificateId.trim() !== '') {
@@ -77,7 +84,7 @@ export const getAuditEvents = async (req, res) => {
                     id as rawId,
                     'application' as source,
                     'verification' as type,
-                    'Credential Verified' as eventType,
+                    CASE WHEN status = 'TAMPERED' THEN 'Credential Tampered' ELSE 'Credential Verified' END as eventType,
                     certificateId,
                     NULL as institutionId,
                     NULL as issuer,

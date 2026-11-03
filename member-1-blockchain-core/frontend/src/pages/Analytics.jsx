@@ -163,8 +163,13 @@ export default function Analytics() {
         }
       };
 
-      const timeoutGuard = new Promise(resolve => setTimeout(resolve, 2500));
-      await Promise.race([performLoad(), timeoutGuard]);
+      await Promise.race([
+        performLoad(),
+        new Promise(resolve => setTimeout(async () => {
+          await loadContractFallback();
+          resolve();
+        }, 1500))
+      ]);
     } catch (err) {
       console.error('Error loading analytics data:', err);
       await loadContractFallback();

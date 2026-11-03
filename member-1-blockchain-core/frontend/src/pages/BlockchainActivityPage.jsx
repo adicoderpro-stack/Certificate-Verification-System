@@ -76,69 +76,86 @@ export default function BlockchainActivityPage() {
     return token;
   };
 
-  const loadAuditEvents = async (pageNum, eventTypeFilter, sourceFilter, search) => {
+  const loadAuditEvents = async (pageNum = 1, eventTypeFilter = selectedEventType, sourceFilter = selectedSource, search = searchTerm) => {
     try {
       setLoading(true);
       setError(null);
 
-      const performAuditLoad = async () => {
-        let token = await getAuthToken();
-        let headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+      let fetchedBackendEvents = [];
 
-        const params = new URLSearchParams({
-          page: pageNum,
-          limit: limit,
-          ...(eventTypeFilter !== 'ALL' && { eventType: eventTypeFilter }),
-          ...(sourceFilter !== 'ALL' && { source: sourceFilter }),
-          ...(search.trim() !== '' && { search: search.trim() })
-        });
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2000);
-
+      const apiUrl = getApiUrl();
+      if (apiUrl) {
         try {
+          let token = await getAuthToken();
+          let headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+
+          const params = new URLSearchParams({
+            page: pageNum,
+            limit: 50,
+            ...(eventTypeFilter !== 'ALL' && { eventType: eventTypeFilter }),
+            ...(sourceFilter !== 'ALL' && { source: sourceFilter }),
+            ...(search.trim() !== '' && { search: search.trim() })
+          });
+
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 1200);
+
           let res = await fetch(`${apiUrl}/api/audit/events?${params.toString()}`, { headers, signal: controller.signal });
           clearTimeout(timeoutId);
 
           if (res.ok) {
             const data = await res.json();
-            if (data.events && data.events.length > 0) {
-              setEvents(data.events);
-              setPagination(data.pagination || { page: pageNum, limit: limit, total: data.events.length, totalPages: 1 });
-              setLatestBlock(data.latestBlock || 12049815);
-              return;
+            if (Array.isArray(data.events)) {
+              fetchedBackendEvents = data.events;
             }
           }
         } catch (fetchErr) {
-          clearTimeout(timeoutId);
+          // Graceful fallback to client verification cache & blockchain events
         }
+      }
 
-        // Direct fallback to blockchain & demo events
-        await loadContractEventsFallback();
-      };
-
-      const timeoutGuard = new Promise(resolve => setTimeout(resolve, 2500));
-      await Promise.race([performAuditLoad(), timeoutGuard]);
+      await loadContractEventsFallback(pageNum, eventTypeFilter, sourceFilter, search, fetchedBackendEvents);
     } catch (err) {
       console.error('Failed to load audit events:', err);
-      await loadContractEventsFallback();
+      await loadContractEventsFallback(pageNum, eventTypeFilter, sourceFilter, search, []);
     } finally {
       setLoading(false);
     }
   };
 
-  const loadContractEventsFallback = async () => {
+  const loadContractEventsFallback = async (pageNum = 1, eventTypeFilter = selectedEventType, sourceFilter = selectedSource, search = searchTerm, backendEvents = []) => {
     try {
-      const fallbackEvents = [
-        { source: 'blockchain', eventType: 'InstitutionRegistered', blockNumber: 12049800, transactionHash: '0x9d4f65d9d5021918b528d1e11c1bf10d9020a09c4454d4f51f494e53545f303', institutionId: 'DEMO_INST_01', issuer: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', createdAt: new Date().toISOString() },
-        { source: 'blockchain', eventType: 'IssuerAuthorized', blockNumber: 12049815, transactionHash: '0x38d4f65d9d5021918b528d1e11c1bf10d9020a09a14898d6f1c1689ddfed0253', institutionId: 'DEMO_INST_01', issuer: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', createdAt: new Date(Date.now() - 3600000).toISOString() },
-        { source: 'application', eventType: 'Credential Verified', status: 'VALID', certificateId: 'CERT-2026-672901', institutionId: 'DEMO_INST_01', createdAt: new Date(Date.now() - 7200000).toISOString() }
-      ];
+      let allEvents = [];
+      const seenIds = new Set();
 
+      const addEvent = (ev) => {
+        if (!ev) return;
+        const idKey = ev.uniqueId || ev.id || `${ev.source || ''}-${ev.eventType || ''}-${ev.certificateId || ''}-${ev.timestamp || ''}`;
+        if (!seenIds.has(idKey)) {
+          seenIds.add(idKey);
+          allEvents.push(ev);
+        }
+      };
+
+      // 1. Add any fetched backend events
+      if (Array.isArray(backendEvents)) {
+        backendEvents.forEach(addEvent);
+      }
+
+      // 2. Add application verification & tamper logs from localStorage
+      try {
+        const storedLogs = JSON.parse(localStorage.getItem('credchain_audit_verifications') || '[]');
+        if (Array.isArray(storedLogs)) {
+          storedLogs.forEach(addEvent);
+        }
+      } catch(e) {}
+
+      // 3. Add locally issued and revoked credentials
       try {
         const local = JSON.parse(localStorage.getItem('credchain_local_credentials') || '{}');
         Object.values(local).forEach(c => {
-          fallbackEvents.unshift({
+          addEvent({
+            id: `audit-cert-${c.certId}`,
             source: 'blockchain',
             eventType: c.status === 'REVOKED' ? 'CertificateRevoked' : 'CertificateIssued',
             blockNumber: c.blockNumber || 12049830,
@@ -146,13 +163,122 @@ export default function BlockchainActivityPage() {
             certificateId: c.certId,
             institutionId: c.institutionId || 'DEMO_INST_01',
             issuer: c.issuer || '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
-            createdAt: c.issueTimestamp ? new Date(c.issueTimestamp * 1000).toISOString() : new Date().toISOString()
+            timestamp: c.issueTimestamp ? new Date(c.issueTimestamp * 1000).toISOString() : new Date().toISOString(),
+            createdAt: c.issueTimestamp ? new Date(c.issueTimestamp * 1000).toISOString() : new Date().toISOString(),
+            version: c.version || 1
           });
         });
       } catch(e) {}
 
-      setEvents(fallbackEvents);
-      setPagination({ page: 1, limit: fallbackEvents.length, total: fallbackEvents.length, totalPages: 1 });
+      // 4. Always ensure Canonical Ground Truth Demo Events (tamper, valid verification, registration, authorization)
+      const canonicalDefaults = [
+        {
+          id: 'audit-tamper-demo-1',
+          source: 'application',
+          eventType: 'Credential Tampered',
+          status: 'TAMPERED',
+          certificateId: 'CERT-2026-672901',
+          institutionId: 'DEMO_INST_01',
+          issuer: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+          timestamp: new Date(Date.now() - 1800000).toISOString(),
+          createdAt: new Date(Date.now() - 1800000).toISOString(),
+          ipAddress: '192.168.1.42 (Untrusted Client)',
+          computedHash: '0x8f229419b48c1e21b72e947c94726487123491bcdef09123847592813957291a'
+        },
+        {
+          id: 'audit-valid-demo-1',
+          source: 'application',
+          eventType: 'Credential Verified',
+          status: 'VALID',
+          certificateId: 'CERT-2026-672901',
+          institutionId: 'DEMO_INST_01',
+          issuer: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+          timestamp: new Date(Date.now() - 7200000).toISOString(),
+          createdAt: new Date(Date.now() - 7200000).toISOString(),
+          ipAddress: '10.0.0.12 (HR Verification Portal)',
+          computedHash: '0x328b9c6475a34e0a7f1c93a027376c6696eaebf5e9332e6504bdfd9426f4f134'
+        },
+        {
+          id: 'audit-cert-default-1',
+          source: 'blockchain',
+          eventType: 'CertificateIssued',
+          status: 'ACTIVE',
+          certificateId: 'CERT-2026-672901',
+          institutionId: 'DEMO_INST_01',
+          issuer: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+          blockNumber: 12049822,
+          transactionHash: '0x5b3f112001928374a58930198273645192837465918237465918273645192837',
+          timestamp: new Date(Date.now() - 86400000).toISOString(),
+          createdAt: new Date(Date.now() - 86400000).toISOString(),
+          version: 1
+        },
+        {
+          id: 'audit-reg-1',
+          source: 'blockchain',
+          eventType: 'InstitutionRegistered',
+          blockNumber: 12049800,
+          transactionHash: '0x9d4f65d9d5021918b528d1e11c1bf10d9020a09c4454d4f51f494e53545f303',
+          institutionId: 'DEMO_INST_01',
+          issuer: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+          timestamp: new Date(Date.now() - 172800000).toISOString(),
+          createdAt: new Date(Date.now() - 172800000).toISOString()
+        },
+        {
+          id: 'audit-auth-1',
+          source: 'blockchain',
+          eventType: 'IssuerAuthorized',
+          blockNumber: 12049815,
+          transactionHash: '0x38d4f65d9d5021918b528d1e11c1bf10d9020a09a14898d6f1c1689ddfed0253',
+          institutionId: 'DEMO_INST_01',
+          issuer: '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+          timestamp: new Date(Date.now() - 168000000).toISOString(),
+          createdAt: new Date(Date.now() - 168000000).toISOString()
+        }
+      ];
+      canonicalDefaults.forEach(addEvent);
+
+      // Sort chronologically newest first
+      allEvents.sort((a, b) => new Date(b.timestamp || b.createdAt).getTime() - new Date(a.timestamp || a.createdAt).getTime());
+
+      // Filter by Source
+      if (sourceFilter && sourceFilter !== 'ALL') {
+        allEvents = allEvents.filter(e => e.source === sourceFilter);
+      }
+
+      // Filter by Event Type
+      if (eventTypeFilter && eventTypeFilter !== 'ALL') {
+        if (eventTypeFilter === 'Credential Tampered') {
+          allEvents = allEvents.filter(e => e.eventType === 'Credential Tampered' || e.status === 'TAMPERED');
+        } else if (eventTypeFilter === 'Credential Verified') {
+          allEvents = allEvents.filter(e => e.eventType === 'Credential Verified' && e.status !== 'TAMPERED');
+        } else {
+          allEvents = allEvents.filter(e => e.eventType === eventTypeFilter);
+        }
+      }
+
+      // Filter by Search Query
+      if (search && search.trim()) {
+        const q = search.trim().toLowerCase();
+        allEvents = allEvents.filter(e => {
+          const matchTx = (e.transactionHash || '').toLowerCase().includes(q);
+          const matchCert = (e.certificateId || '').toLowerCase().includes(q);
+          const matchInst = (e.institutionId || '').toLowerCase().includes(q);
+          const matchIssuer = (e.issuer || '').toLowerCase().includes(q);
+          const matchIp = (e.ipAddress || '').toLowerCase().includes(q);
+          const matchStatus = (e.status || '').toLowerCase().includes(q);
+          return matchTx || matchCert || matchInst || matchIssuer || matchIp || matchStatus;
+        });
+      }
+
+      // Paginate
+      const total = allEvents.length;
+      const totalPages = Math.max(1, Math.ceil(total / limit));
+      const page = Math.min(pageNum, totalPages);
+      const startIdx = (page - 1) * limit;
+      const paginated = allEvents.slice(startIdx, startIdx + limit);
+
+      setEvents(paginated);
+      setPagination({ page, limit, total, totalPages });
       setLatestBlock(12049830);
     } catch (e) {
       console.error('loadContractEventsFallback error:', e);
@@ -164,12 +290,16 @@ export default function BlockchainActivityPage() {
     const source = typeof event === 'object' ? event.source : null;
     const status = typeof event === 'object' ? event.status : null;
 
+    if (name === 'Credential Tampered' || status === 'TAMPERED') {
+      return <Badge type="danger">Credential Tampered (TAMPERED)</Badge>;
+    }
+
     if (source === 'application' || name === 'Credential Verified' || name === 'Certificate Verified') {
       switch (status) {
         case 'VALID':
           return <Badge type="success">Credential Verified (VALID)</Badge>;
         case 'TAMPERED':
-          return <Badge type="warning">Credential Verified (TAMPERED)</Badge>;
+          return <Badge type="danger">Credential Tampered (TAMPERED)</Badge>;
         case 'REVOKED':
           return <Badge type="danger">Credential Verified (REVOKED)</Badge>;
         case 'EXPIRED':
@@ -285,10 +415,11 @@ export default function BlockchainActivityPage() {
               }}
             >
               <option value="ALL">All Event Types</option>
+              <option value="Credential Tampered">Credential Tampered (Security Warning)</option>
+              <option value="Credential Verified">Credential Verified (Integrity Check)</option>
               <option value="CertificateIssued">Certificate Issued</option>
               <option value="CertificateRevoked">Certificate Revoked</option>
               <option value="CertificateVersionCreated">Certificate Version Created</option>
-              <option value="Credential Verified">Credential Verified</option>
               <option value="InstitutionRegistered">Institution Registered</option>
               <option value="InstitutionDeactivated">Institution Deactivated</option>
               <option value="IssuerAuthorized">Issuer Authorized</option>
