@@ -39,11 +39,15 @@ export default function BlockchainActivityPage() {
     const apiUrl = getApiUrl();
     if (!apiUrl) return null;
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1200);
       const res = await fetch(`${apiUrl}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'admin', password: 'admin123' })
+        body: JSON.stringify({ username: 'admin', password: 'admin123' }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
       if (res.ok) {
         const data = await res.json();
         if (data.token) {
@@ -60,7 +64,14 @@ export default function BlockchainActivityPage() {
   const getAuthToken = async () => {
     let token = localStorage.getItem('token') || localStorage.getItem('credchain_token');
     if (!token) {
-      token = await fetchFreshAuthToken();
+      try {
+        token = await Promise.race([
+          fetchFreshAuthToken(),
+          new Promise(resolve => setTimeout(() => resolve(null), 1200))
+        ]);
+      } catch (e) {
+        token = null;
+      }
     }
     return token;
   };
@@ -124,9 +135,25 @@ export default function BlockchainActivityPage() {
         { source: 'application', eventType: 'Credential Verified', status: 'VALID', certificateId: 'CERT-2026-672901', institutionId: 'DEMO_INST_01', createdAt: new Date(Date.now() - 7200000).toISOString() }
       ];
 
+      try {
+        const local = JSON.parse(localStorage.getItem('credchain_local_credentials') || '{}');
+        Object.values(local).forEach(c => {
+          fallbackEvents.unshift({
+            source: 'blockchain',
+            eventType: c.status === 'REVOKED' ? 'CertificateRevoked' : 'CertificateIssued',
+            blockNumber: c.blockNumber || 12049830,
+            transactionHash: c.txHash || '0x000',
+            certificateId: c.certId,
+            institutionId: c.institutionId || 'DEMO_INST_01',
+            issuer: c.issuer || '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+            createdAt: c.issueTimestamp ? new Date(c.issueTimestamp * 1000).toISOString() : new Date().toISOString()
+          });
+        });
+      } catch(e) {}
+
       setEvents(fallbackEvents);
       setPagination({ page: 1, limit: fallbackEvents.length, total: fallbackEvents.length, totalPages: 1 });
-      setLatestBlock(12049815);
+      setLatestBlock(12049830);
     } catch (e) {
       console.error('loadContractEventsFallback error:', e);
     }

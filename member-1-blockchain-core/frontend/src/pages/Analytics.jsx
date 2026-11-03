@@ -56,11 +56,15 @@ export default function Analytics() {
     const apiUrl = getApiUrl();
     if (!apiUrl) return null;
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1200);
       const res = await fetch(`${apiUrl}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'admin', password: 'admin123' })
+        body: JSON.stringify({ username: 'admin', password: 'admin123' }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
       if (res.ok) {
         const data = await res.json();
         if (data.token) {
@@ -77,7 +81,14 @@ export default function Analytics() {
   const getAuthToken = async () => {
     let token = localStorage.getItem('token') || localStorage.getItem('credchain_token');
     if (!token) {
-      token = await fetchFreshAuthToken();
+      try {
+        token = await Promise.race([
+          fetchFreshAuthToken(),
+          new Promise(resolve => setTimeout(() => resolve(null), 1200))
+        ]);
+      } catch (e) {
+        token = null;
+      }
     }
     return token;
   };
