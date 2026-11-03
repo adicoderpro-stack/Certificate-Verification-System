@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '../common/Components';
 import { blockchainService } from '../../services/blockchain';
+import GlobalSearch from './GlobalSearch';
 
 function CredChainLogoMark({ size = 20 }) {
   return (
@@ -227,10 +228,7 @@ export function Header({ wallet, network, connect, theme, toggleTheme }) {
   return (
     <header className="header">
       <div className="header-left">
-        <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-main)', padding: '0.45rem 0.9rem', borderRadius: 'var(--radius-md)', color: 'var(--text-muted)', width: '320px', border: '1px solid var(--border)' }}>
-          <Search size={15} style={{ marginRight: '0.6rem', color: 'var(--text-muted)' }} />
-          <span style={{ fontSize: '0.85rem' }}>Search credentials, hashes, issuers...</span>
-        </div>
+        <GlobalSearch />
       </div>
       <div className="header-right">
         {/* Network Badge */}

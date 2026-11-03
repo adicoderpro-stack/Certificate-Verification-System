@@ -66,8 +66,9 @@ export default function PublicVerification({ theme, toggleTheme }) {
 
   const handleVerify = async (e) => {
     e.preventDefault();
-    if (!selectedFile) {
-      alert('Please select a certificate PDF file');
+    const activeCertId = certId.trim();
+    if (!selectedFile && !activeCertId) {
+      alert('Please enter a Certificate ID or select a certificate PDF file');
       return;
     }
 
@@ -75,40 +76,59 @@ export default function PublicVerification({ theme, toggleTheme }) {
       setLoading(true);
       setResult(null);
 
-      // 1. Read file bytes and compute deterministic SHA-256 hash in-browser
-      const arrayBuffer = await selectedFile.arrayBuffer();
-      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const computedHash = "0x" + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      let computedHash = null;
+      let resolvedCertId = activeCertId;
 
-      // 2. Resolve Certificate ID (from manual input or auto-detect from PDF bytes)
-      let activeCertId = certId.trim();
-      if (!activeCertId) {
-        activeCertId = extractCertificateIdFromBuffer(arrayBuffer) || '';
+      if (selectedFile) {
+        // 1. Read file bytes and compute deterministic SHA-256 hash in-browser
+        const arrayBuffer = await selectedFile.arrayBuffer();
+        const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        computedHash = "0x" + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+        if (!resolvedCertId) {
+          resolvedCertId = extractCertificateIdFromBuffer(arrayBuffer) || '';
+        }
+
+        if (!resolvedCertId) {
+          setResult({
+            status: 'MANUAL_ID_REQUIRED',
+            message: 'Credential ID could not be detected automatically from this PDF. Please enter it manually in the input above.'
+          });
+          return;
+        }
       }
 
-      if (!activeCertId) {
-        setResult({
-          status: 'MANUAL_ID_REQUIRED',
-          message: 'Credential ID could not be detected automatically from this PDF. Please enter it manually in the input above.'
-        });
-        return;
+      // Direct on-chain verification query
+      let statusText = 'NOT_FOUND';
+      if (computedHash) {
+        statusText = await blockchainService.verifyCertificate(resolvedCertId, computedHash);
+      } else {
+        const certRecord = await blockchainService.getCertificate(resolvedCertId);
+        if (certRecord && (certRecord[7] ?? certRecord.exists)) {
+          const rawStatus = Number(certRecord[5] ?? certRecord.status ?? 0);
+          const expiry = Number(certRecord[4] ?? certRecord.expiryTimestamp ?? 0);
+          const nowSec = Math.floor(Date.now() / 1000);
+          if (rawStatus === 1) statusText = 'REVOKED';
+          else if (expiry > 0 && nowSec > expiry) statusText = 'EXPIRED';
+          else statusText = 'VALID';
+          computedHash = String(certRecord[1] || certRecord.certificateHash || '');
+        } else {
+          statusText = 'NOT_FOUND';
+        }
       }
 
-      // 3. Direct on-chain verification query (requires ZERO wallet connection!)
-      const statusText = await blockchainService.verifyCertificate(activeCertId, computedHash);
-
-      // 4. Fetch on-chain details if record exists
+      // Fetch on-chain details if record exists
       let version = '-';
       let details = null;
 
-      if (['VALID', 'TAMPERED', 'REVOKED', 'EXPIRED'].includes(statusText) && activeCertId) {
+      if (['VALID', 'TAMPERED', 'REVOKED', 'EXPIRED'].includes(statusText) && resolvedCertId) {
         try {
-          const cert = await blockchainService.getCertificate(activeCertId);
+          const cert = await blockchainService.getCertificate(resolvedCertId);
           if (cert && (cert[7] ?? cert.exists)) {
             version = (cert[6] ?? cert.version ?? 1).toString();
             details = {
-              id: String(cert[0] || cert.certificateId || activeCertId),
+              id: String(cert[0] || cert.certificateId || resolvedCertId),
               hash: String(cert[1] || cert.certificateHash || ''),
               issuer: String(cert[2] || cert.issuer || ''),
               expiry: (cert[4] ?? cert.expiryTimestamp ?? 0).toString(),
@@ -121,25 +141,27 @@ export default function PublicVerification({ theme, toggleTheme }) {
         }
       }
 
-      // 5. Optional backend telemetry log (non-blocking)
-      const API_URL = import.meta.env.VITE_API_URL;
-      if (API_URL) {
-        try {
-          const formData = new FormData();
-          formData.append('certificateId', activeCertId);
-          formData.append('pdf', selectedFile);
-          fetch(`${API_URL}/api/certificates/verify`, {
-            method: 'POST',
-            body: formData
-          }).catch(() => {});
-        } catch (e) {}
+      // Optional backend telemetry log (non-blocking)
+      if (selectedFile) {
+        const API_URL = import.meta.env.VITE_API_URL;
+        if (API_URL) {
+          try {
+            const formData = new FormData();
+            formData.append('certificateId', resolvedCertId);
+            formData.append('pdf', selectedFile);
+            fetch(`${API_URL}/api/certificates/verify`, {
+              method: 'POST',
+              body: formData
+            }).catch(() => {});
+          } catch (e) {}
+        }
       }
 
       setResult({
         status: statusText,
         version,
         details,
-        certificateId: activeCertId,
+        certificateId: resolvedCertId,
         computedHash
       });
 
